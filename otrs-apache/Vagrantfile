@@ -1,0 +1,174 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# All Vagrant configuration is done below. The "2" in Vagrant.configure
+# configures the configuration version (we support older styles for
+# backwards compatibility). Please don't change it unless you know what
+# you're doing.
+Vagrant.configure("2") do |config|
+  # The most common configuration options are documented and commented below.
+  # For a complete reference, please see the online documentation at
+  # https://docs.vagrantup.com.
+
+  # Every Vagrant development environment requires a box. You can search for
+  # boxes at https://atlas.hashicorp.com/search.
+  config.vm.box = "ubuntu/trusty64"
+
+  # Disable automatic box update checking. If you disable this, then
+  # boxes will only be checked for updates when the user runs
+  # `vagrant box outdated`. This is not recommended.
+  # config.vm.box_check_update = false
+
+  # Create a forwarded port mapping which allows access to a specific port
+  # within the machine from a port on the host machine. In the example below,
+  # accessing "localhost:8080" will access port 80 on the guest machine.
+  config.vm.network "forwarded_port", guest: 80, host: 8080
+
+  # Create a private network, which allows host-only access to the machine
+  # using a specific IP.
+  # config.vm.network "private_network", ip: "192.168.33.10"
+
+  # Create a public network, which generally matched to bridged network.
+  # Bridged networks make the machine appear as another physical device on
+  # your network.
+   config.vm.network "public_network"
+
+  # Share an additional folder to the guest VM. The first argument is
+  # the path on the host to the actual folder. The second argument is
+  # the path on the guest to mount the folder. And the optional third
+  # argument is a set of non-required options.
+  # config.vm.synced_folder "../data", "/vagrant_data"
+
+  # Provider-specific configuration so you can fine-tune various
+  # backing providers for Vagrant. These expose provider-specific options.
+  # Example for VirtualBox:
+  #
+   config.vm.provider "virtualbox" do |vb|
+     # Display the VirtualBox GUI when booting the machine
+     #vb.gui = true
+  
+     # Customize the amount of memory on the VM:
+     vb.memory = "1024"
+     vb.name   = "otrs-apache"
+   end
+  #
+  # View the documentation for the provider you are using for more
+  # information on available options.
+
+  # Define a Vagrant Push strategy for pushing to Atlas. Other push strategies
+  # such as FTP and Heroku are also available. See the documentation at
+  # https://docs.vagrantup.com/v2/push/atlas.html for more information.
+  # config.push.define "atlas" do |push|
+  #   push.app = "YOUR_ATLAS_USERNAME/YOUR_APPLICATION_NAME"
+  # end
+
+  # Rsync folder if you need syncronize something
+  # rsync_exclude -> Ignore a folder
+  # rsync_args    -> Use for another arguments
+
+  # config.vm.synced_folder "bin", "/usr/local/bin", type: "rsync",
+  #  rsync__exclude: ".git/",
+  #  rsync__args: ["--verbose", "--rsync-path='sudo rsync'", "--archive", "--delete", "-z"]
+  # end
+  
+  
+  # Enable provisioning with a shell script. Additional provisioners such as
+  # Puppet, Chef, Ansible, Salt, and Docker are also available. Please see the
+  # documentation for more information about their specific syntax and use.
+   config.vm.provision "shell", inline: <<-SHELL
+     echo "Criando layout básico da máquina"
+     apt-get -qq update
+     apt-get -qq install -y apache2
+     apt-get -qq autoremove -y
+    
+     # Config Apache2
+     if [ ! "`grep 'ServerName localhost' /etc/apache2/apache2.conf\`" ];
+     then
+      echo "ServerName Não encontrado!"
+      echo "Vou criar para você, aguarde..."
+      sed -i "s/^#.ServerName.*/ServerName localhost/" /etc/apache2/apache2.conf
+      if [ $? -eq 0 ];
+      then
+       sed -i '1s/^/ServerName localhost\\n/' /etc/apache2/apache2.conf
+      fi
+      echo "ServerName Criado - OK"
+     fi
+
+     # Restart Apache
+     service apache2 restart
+
+     # Check Correct install
+     if [ $? -eq 0 ];
+     then
+      echo "APACHE: Successo :)"
+     else
+      echo "APACHE: ERROR, algo de errado! :("
+      exit 0
+     fi
+     sleep 3
+
+     echo "Espere, vou instalar o OTRS para você!"
+     export OTRS_VERSION="5.0.17"
+     echo "Vou instalar a versão : ${OTRS_VERSION}"
+     echo "Aguarde enquanto preparo tudo..."
+     sleep 5
+     cd /opt/
+     wget -q http://ftp.otrs.org/pub/otrs/otrs-${OTRS_VERSION}.tar.gz
+     tar -xzf $( ls otrs*.tar.gz* )
+     ln -s $( echo $( echo $( pwd;ls -d otrs-${OTRS_VERSION} ) | sed 's/ /\\//g' ) ) otrs
+
+     # Packages For OTRS
+     cd /opt/otrs/
+     for I in $( /opt/otrs/bin/otrs.CheckModules.pl | grep 'Not installed' | tr -s " " | cut -d " " -f9 | sed "s/'//" ); do
+        apt-get -qq -y install $I;
+     done
+
+     # Mysql
+     export DEBIAN_FRONTEND=noninteractive
+     debconf-set-selections <<< 'mariadb-server-5.5 mysql-server/root_password password 123456'
+     debconf-set-selections <<< 'mariadb-server-5.5 mysql-server/root_password_again password 123456'
+
+     apt-get -qq -y install mariadb-server libapache2-mod-perl2 libdbd-mysql-perl libnet-dns-perl libnet-ldap-perl libio-socket-ssl-perl libpdf-api2-perl libsoap-lite-perl libgd-text-perl libgd-graph-perl libapache-dbi-perl
+     apt-get -qq update
+
+     echo "Finalizado a instalção do OTRS!"
+     echo "Agora vou configurar tudo!"
+     sleep 5
+
+     # OTRS Kernel Default Config
+     cd /opt/otrs/Kernel
+     cp Config.pm.dist Config.pm
+
+     # Apache Config
+     cp /opt/otrs/scripts/apache2-httpd.include.conf /etc/apache2/sites-available/otrs.conf
+     a2ensite otrs.conf
+     a2disite 000-default.conf
+     service apache2 reload
+
+     # Mysql Config
+     sed -i 's/^max_allowed_packet.*/max_allowed_packet\\t= 20M/' /etc/mysql/my.cnf
+     sed -i 's/^query_cache_size.*/query_cache_size\\t= 32M/' /etc/mysql/my.cnf
+     sed -i '44s/^/innodb_log_file_size\\t= 256M\\n/' /etc/mysql/my.cnf
+     rm /var/lib/mysql/ib*
+     service mysql restart
+
+     # Create user otrs and Check Permissions
+     useradd -r -d /opt/otrs/ -c 'otrs user' otrs
+     usermod -g www-data otrs
+     cd /opt/otrs
+     bin/otrs.SetPermissions.pl --otrs-user=otrs --web-group=www-data /opt/otrs
+
+     # Check Pre-reqs again
+     /opt/otrs/bin/otrs.CheckModules.pl
+
+     # Info to Access
+     echo "#######################################################"
+     echo "#                                                     #"
+     echo "#   Acesse : http://localhost:8080/otrs/installer.pl  #"
+     echo "#                                                     #"
+     echo "#   DBlogin:root  DBpass: 123456                      #"
+     echo "#   						 	 #"
+     echo "#######################################################"
+
+   SHELL
+end
