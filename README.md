@@ -1,5 +1,5 @@
 # vagrant
-Arquivos do VagrantFile
+VagrantFile
 -
 Aqui está armazenado todos os VagrantFile que criei para projetos de Homologação,
 a finalidade do Vagrant é permitir que várias pessoas consigam chegar no mesmo cenário de testes,
