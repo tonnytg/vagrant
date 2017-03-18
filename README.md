@@ -1,4 +1,3 @@
-# vagrant
 VagrantFile Porque ?
 -
 Aqui está armazenado todos os VagrantFile que criei para projetos de Homologação,
